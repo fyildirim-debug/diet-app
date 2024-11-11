@@ -1,0 +1,190 @@
+/* Genel Stiller */
+.meal-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+}
+
+/* Kart Stilleri */
+.card {
+    border: none;
+    border-radius: 15px;
+    box-shadow: 0 2px 15px rgba(0, 0, 0, 0.05);
+    transition: all 0.3s ease;
+}
+
+.card:hover {
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
+}
+
+/* Form Elemanları */
+.form-control, .form-select {
+    border: 1.5px solid #e0e0e0;
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: var(--bs-primary);
+    box-shadow: 0 0 0 0.25rem rgba(var(--bs-primary-rgb), 0.1);
+}
+
+.input-group-text {
+    border-radius: 10px;
+    background-color: transparent;
+}
+
+/* Butonlar */
+.btn {
+    padding: 0.75rem 1.5rem;
+    border-radius: 10px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+}
+
+.btn-lg {
+    padding: 1rem 2rem;
+}
+
+/* Progress Bar */
+.progress {
+    height: 10px;
+    border-radius: 10px;
+    background-color: #f0f0f0;
+    overflow: hidden;
+}
+
+.progress-bar {
+    transition: width 0.3s ease;
+}
+
+/* Badge */
+.badge {
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-weight: 500;
+}
+
+/* Son Eklenenler Listesi */
+.recent-foods {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.recent-food-item {
+    transition: all 0.3s ease;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    background-color: var(--bs-light);
+}
+
+.recent-food-item:hover {
+    background-color: var(--bs-primary-bg-subtle);
+    transform: translateX(5px);
+}
+
+/* Besin Değerleri Kartları */
+.nutrition-card {
+    border-radius: 12px;
+    padding: 1.25rem;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.nutrition-card:hover {
+    transform: translateY(-5px);
+}
+
+.nutrition-icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Animasyonlar */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fade-in {
+    animation: fadeIn 0.3s ease forwards;
+}
+
+.slide-up {
+    animation: slideUp 0.3s ease forwards;
+}
+
+/* Loading Modal */
+.loading-spinner {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* Responsive Ayarlar */
+@media (max-width: 768px) {
+    .meal-container {
+        padding: 1rem;
+    }
+
+    .card {
+        margin-bottom: 1rem;
+    }
+
+    .btn-lg {
+        padding: 0.75rem 1.5rem;
+    }
+}
+
+/* Scrollbar Stilleri */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Özel Renkler */
+.bg-primary-subtle {
+    background-color: rgba(var(--bs-primary-rgb), 0.1) !important;
+}
+
+.bg-success-subtle {
+    background-color: rgba(var(--bs-success-rgb), 0.1) !important;
+}
+
+.bg-warning-subtle {
+    background-color: rgba(var(--bs-warning-rgb), 0.1) !important;
+}
+
+.bg-danger-subtle {
+    background-color: rgba(var(--bs-danger-rgb), 0.1) !important;
+}
