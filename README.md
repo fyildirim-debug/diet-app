@@ -1,5 +1,15 @@
 # Sağlıklı Yaşam Asistanı / Healthy Life Assistant
 
+📸 Screenshots/Ekran Görüntüleri
+<table>
+<tr>
+<td><img src="photos/profile.png" alt="Profile" width="200"/></td>
+<td><img src="photos/nutrition.png" alt="Nutrition" width="200"/></td>
+<td><img src="photos/progress.png" alt="Progress" width="200"/></td>
+<td><img src="photos/water.png" alt="Water" width="200"/></td>
+</tr>
+</table>
+
 [English](#english) | [Türkçe](#turkish)
 
 ## Turkish
