@@ -1,6 +1,4 @@
 <?php
-// modules/profile/setup.php
-
 require_once '../../config/config.php';
 require_once '../../config/database.php';
 require_once '../../includes/functions.php';
@@ -19,6 +17,11 @@ try {
     $stmt = $conn->prepare("SELECT * FROM user_profiles WHERE user_id = ?");
     $stmt->execute([$_SESSION['user_id']]);
     $profile = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    // Sağlık durumlarını çek
+    $stmt = $conn->prepare("SELECT condition_name FROM health_conditions WHERE user_id = ?");
+    $stmt->execute([$_SESSION['user_id']]);
+    $healthConditions = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
     if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $age = clean($_POST['age']);
@@ -43,16 +46,65 @@ try {
             $error = 'Geçerli bir hedef kilo girin.';
         } else {
             // OpenAI'dan kalori hesaplaması
-            $prompt = "Lütfen şu bilgilere göre günlük kalori ihtiyacını hesapla: 
-                      Yaş: $age, 
-                      Cinsiyet: $gender, 
-                      Kilo: $current_weight kg, 
-                      Boy: $height cm, 
-                      Aktivite seviyesi: $activity_level. 
-                      Sadece sayısal değeri ver.";
+            $prompt = "Lütfen şu bilgilere göre günlük kalori ihtiyacını hesapla ve sadece sayısal değer ver: 
+                      Yaş: {$age}, 
+                      Cinsiyet: " . ($gender == 'male' ? 'erkek' : 'kadın') . ", 
+                      Kilo: {$current_weight} kg, 
+                      Boy: {$height} cm, 
+                      Aktivite seviyesi: " . ($activity_level == 'sedentary' ? 'hareketsiz' :
+                    ($activity_level == 'lightly_active' ? 'az hareketli' :
+                        ($activity_level == 'moderately_active' ? 'orta hareketli' : 'çok hareketli'))) . "
+                      Hedef: " . ($target_weight < $current_weight ? 'kilo vermek' :
+                    ($target_weight > $current_weight ? 'kilo almak' : 'kiloyu korumak')) . "
+                      
+                      Lütfen sadece günlük kalori ihtiyacını rakam olarak ver. Örnek: 2000";
 
-            $response = askOpenAI($prompt);
-            $daily_calorie = intval($response['choices'][0]['message']['content']);
+            try {
+                $response = askOpenAI($prompt);
+
+                // Yanıttan sadece sayıyı çıkar
+                preg_match('/\d+/', $response['choices'][0]['message']['content'], $matches);
+                $daily_calorie = isset($matches[0]) ? intval($matches[0]) : 2000;
+
+                // Mantıklı bir aralıkta olup olmadığını kontrol et
+                if ($daily_calorie < 1200 || $daily_calorie > 4000) {
+                    $daily_calorie = 2000;
+                }
+
+                // Hedef kiloya göre kalori ayarlaması
+                if ($target_weight < $current_weight) {
+                    // Kilo vermek için günlük 500 kalori azalt
+                    $daily_calorie = max(1200, $daily_calorie - 500);
+                } elseif ($target_weight > $current_weight) {
+                    // Kilo almak için günlük 500 kalori ekle
+                    $daily_calorie = min(4000, $daily_calorie + 500);
+                }
+
+            } catch (Exception $e) {
+                // Hata durumunda Harris-Benedict formülü ile hesapla
+                if ($gender == 'male') {
+                    $bmr = 88.362 + (13.397 * $current_weight) + (4.799 * $height) - (5.677 * $age);
+                } else {
+                    $bmr = 447.593 + (9.247 * $current_weight) + (3.098 * $height) - (4.330 * $age);
+                }
+
+                // Aktivite faktörü
+                $activity_factors = [
+                    'sedentary' => 1.2,
+                    'lightly_active' => 1.375,
+                    'moderately_active' => 1.55,
+                    'very_active' => 1.725
+                ];
+
+                $daily_calorie = round($bmr * ($activity_factors[$activity_level] ?? 1.2));
+
+                // Hedef kiloya göre ayarlama
+                if ($target_weight < $current_weight) {
+                    $daily_calorie = max(1200, $daily_calorie - 500);
+                } elseif ($target_weight > $current_weight) {
+                    $daily_calorie = min(4000, $daily_calorie + 500);
+                }
+            }
 
             // Profil oluştur veya güncelle
             if($profile) {

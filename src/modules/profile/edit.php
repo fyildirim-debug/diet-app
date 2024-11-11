@@ -8,25 +8,34 @@ requireLogin();
 
 $error = '';
 $success = '';
+$profile = [];
+$healthConditions = [];
+$userData = [];
 
 try {
     $db = new Database();
     $conn = $db->getConnection();
 
-    // Mevcut kullanıcı bilgilerini çek
-    $stmt = $conn->prepare("
-        SELECT u.*, up.*
-        FROM users u
-        LEFT JOIN user_profiles up ON u.id = up.user_id
-        WHERE u.id = ?
-    ");
+    // Kullanıcı bilgilerini çek
+    $stmt = $conn->prepare("SELECT * FROM users WHERE id = ?");
     $stmt->execute([$_SESSION['user_id']]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    $userData = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    // Mevcut profil bilgilerini çek
+    $stmt = $conn->prepare("SELECT * FROM user_profiles WHERE user_id = ?");
+    $stmt->execute([$_SESSION['user_id']]);
+    $profile = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if(!$profile) {
+        redirect('/modules/profile/setup.php');
+    }
+
+    // Sağlık durumlarını çek
+    $stmt = $conn->prepare("SELECT condition_name FROM health_conditions WHERE user_id = ?");
+    $stmt->execute([$_SESSION['user_id']]);
+    $healthConditions = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
     if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-        // Form verilerini al
-        $name = clean($_POST['name']);
-        $email = clean($_POST['email']);
         $age = clean($_POST['age']);
         $gender = clean($_POST['gender']);
         $height = clean($_POST['height']);
@@ -37,95 +46,131 @@ try {
         $health_conditions = isset($_POST['health_conditions']) ? $_POST['health_conditions'] : [];
 
         // Validasyon
-        if(empty($name) || empty($email)) {
-            $error = 'Ad ve email alanları zorunludur.';
-        } elseif(!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $error = 'Geçerli bir email adresi girin.';
+        if(empty($age) || empty($gender) || empty($height) || empty($current_weight) || empty($target_weight)) {
+            $error = 'Lütfen tüm zorunlu alanları doldurun.';
+        } elseif($age < 15 || $age > 100) {
+            $error = 'Geçerli bir yaş girin.';
+        } elseif($height < 100 || $height > 250) {
+            $error = 'Geçerli bir boy girin.';
+        } elseif($current_weight < 30 || $current_weight > 300) {
+            $error = 'Geçerli bir kilo girin.';
+        } elseif($target_weight < 30 || $target_weight > 300) {
+            $error = 'Geçerli bir hedef kilo girin.';
         } else {
-            // Email değişikliği varsa, başka kullanıcıda kullanılıyor mu kontrol et
-            if($email !== $user['email']) {
-                $stmt = $conn->prepare("SELECT id FROM users WHERE email = ? AND id != ?");
-                $stmt->execute([$email, $_SESSION['user_id']]);
-                if($stmt->fetch()) {
-                    $error = 'Bu email adresi başka bir kullanıcı tarafından kullanılıyor.';
-                }
-            }
+            // OpenAI'dan kalori hesaplaması
+            $prompt = "Lütfen şu bilgilere göre günlük kalori ihtiyacını hesapla ve sadece sayısal değer ver: 
+                      Yaş: {$age}, 
+                      Cinsiyet: " . ($gender == 'male' ? 'erkek' : 'kadın') . ", 
+                      Kilo: {$current_weight} kg, 
+                      Boy: {$height} cm, 
+                      Aktivite seviyesi: " . ($activity_level == 'sedentary' ? 'hareketsiz' :
+                    ($activity_level == 'lightly_active' ? 'az hareketli' :
+                        ($activity_level == 'moderately_active' ? 'orta hareketli' : 'çok hareketli'))) . "
+                      Hedef: " . ($target_weight < $current_weight ? 'kilo vermek' :
+                    ($target_weight > $current_weight ? 'kilo almak' : 'kiloyu korumak')) . "
+                      
+                      Lütfen sadece günlük kalori ihtiyacını rakam olarak ver. Örnek: 2000";
 
-            if(empty($error)) {
-                // Kullanıcı tablosunu güncelle
-                $stmt = $conn->prepare("
-                    UPDATE users 
-                    SET name = ?, email = ?
-                    WHERE id = ?
-                ");
-                $stmt->execute([$name, $email, $_SESSION['user_id']]);
-
-                // Profil tablosunu güncelle
-                $stmt = $conn->prepare("
-                    INSERT INTO user_profiles (
-                        user_id, age, gender, height, current_weight, 
-                        target_weight, activity_level, diet_type
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE
-                        age = VALUES(age),
-                        gender = VALUES(gender),
-                        height = VALUES(height),
-                        current_weight = VALUES(current_weight),
-                        target_weight = VALUES(target_weight),
-                        activity_level = VALUES(activity_level),
-                        diet_type = VALUES(diet_type)
-                ");
-                $stmt->execute([
-                    $_SESSION['user_id'], $age, $gender, $height,
-                    $current_weight, $target_weight, $activity_level, $diet_type
-                ]);
-
-                // Sağlık durumlarını güncelle
-                $stmt = $conn->prepare("DELETE FROM health_conditions WHERE user_id = ?");
-                $stmt->execute([$_SESSION['user_id']]);
-
-                if(!empty($health_conditions)) {
-                    $stmt = $conn->prepare("
-                        INSERT INTO health_conditions (user_id, condition_name) 
-                        VALUES (?, ?)
-                    ");
-                    foreach($health_conditions as $condition) {
-                        $stmt->execute([$_SESSION['user_id'], $condition]);
-                    }
-                }
-
-                // Kalori limitini OpenAI ile hesapla
-                $prompt = "Lütfen şu bilgilere göre günlük kalori ihtiyacını hesapla: 
-                          Yaş: $age, 
-                          Cinsiyet: $gender, 
-                          Kilo: $current_weight kg, 
-                          Boy: $height cm, 
-                          Aktivite seviyesi: $activity_level. 
-                          Sadece sayısal değeri ver.";
-
+            try {
                 $response = askOpenAI($prompt);
-                $daily_calorie = intval($response['choices'][0]['message']['content']);
 
-                // Kalori limitini güncelle
-                $stmt = $conn->prepare("
-                    UPDATE user_profiles 
-                    SET daily_calorie_limit = ? 
-                    WHERE user_id = ?
-                ");
-                $stmt->execute([$daily_calorie, $_SESSION['user_id']]);
+                // Yanıttan sadece sayıyı çıkar
+                preg_match('/\d+/', $response['choices'][0]['message']['content'], $matches);
+                $daily_calorie = isset($matches[0]) ? intval($matches[0]) : 2000;
 
-                $success = 'Profil bilgileriniz başarıyla güncellendi.';
+                // Mantıklı bir aralıkta olup olmadığını kontrol et
+                if ($daily_calorie < 1200 || $daily_calorie > 4000) {
+                    $daily_calorie = 2000;
+                }
 
-                // Session'daki kullanıcı adını güncelle
-                $_SESSION['user_name'] = $name;
+                // Hedef kiloya göre kalori ayarlaması
+                if ($target_weight < $current_weight) {
+                    // Kilo vermek için günlük 500 kalori azalt
+                    $daily_calorie = max(1200, $daily_calorie - 500);
+                } elseif ($target_weight > $current_weight) {
+                    // Kilo almak için günlük 500 kalori ekle
+                    $daily_calorie = min(4000, $daily_calorie + 500);
+                }
+
+            } catch (Exception $e) {
+                // Hata durumunda Harris-Benedict formülü ile hesapla
+                if ($gender == 'male') {
+                    $bmr = 88.362 + (13.397 * $current_weight) + (4.799 * $height) - (5.677 * $age);
+                } else {
+                    $bmr = 447.593 + (9.247 * $current_weight) + (3.098 * $height) - (4.330 * $age);
+                }
+
+                // Aktivite faktörü
+                $activity_factors = [
+                    'sedentary' => 1.2,
+                    'lightly_active' => 1.375,
+                    'moderately_active' => 1.55,
+                    'very_active' => 1.725
+                ];
+
+                $daily_calorie = round($bmr * ($activity_factors[$activity_level] ?? 1.2));
+
+                // Hedef kiloya göre ayarlama
+                if ($target_weight < $current_weight) {
+                    $daily_calorie = max(1200, $daily_calorie - 500);
+                } elseif ($target_weight > $current_weight) {
+                    $daily_calorie = min(4000, $daily_calorie + 500);
+                }
             }
+
+            // Profili güncelle
+            $stmt = $conn->prepare("
+                UPDATE user_profiles 
+                SET age = ?, 
+                    gender = ?, 
+                    height = ?, 
+                    current_weight = ?, 
+                    target_weight = ?, 
+                    activity_level = ?, 
+                    diet_type = ?,
+                    daily_calorie_limit = ?
+                WHERE user_id = ?
+            ");
+
+            $stmt->execute([
+                $age,
+                $gender,
+                $height,
+                $current_weight,
+                $target_weight,
+                $activity_level,
+                $diet_type,
+                $daily_calorie,
+                $_SESSION['user_id']
+            ]);
+
+            // Sağlık durumlarını güncelle
+            $stmt = $conn->prepare("DELETE FROM health_conditions WHERE user_id = ?");
+            $stmt->execute([$_SESSION['user_id']]);
+
+            if(!empty($health_conditions)) {
+                $stmt = $conn->prepare("
+                    INSERT INTO health_conditions (user_id, condition_name) 
+                    VALUES (?, ?)
+                ");
+                foreach($health_conditions as $condition) {
+                    $stmt->execute([$_SESSION['user_id'], $condition]);
+                }
+            }
+
+            // Kilo değişimi olduysa weight_tracking tablosuna ekle
+            if($current_weight != $profile['current_weight']) {
+                $stmt = $conn->prepare("
+                    INSERT INTO weight_tracking (user_id, weight, date) 
+                    VALUES (?, ?, CURRENT_DATE)
+                ");
+                $stmt->execute([$_SESSION['user_id'], $current_weight]);
+            }
+
+            $success = 'Profil bilgileriniz başarıyla güncellendi.';
+            header("refresh:2;url=" . SITE_URL . "/modules/profile/view.php");
         }
     }
-
-    // Mevcut sağlık durumlarını çek
-    $stmt = $conn->prepare("SELECT condition_name FROM health_conditions WHERE user_id = ?");
-    $stmt->execute([$_SESSION['user_id']]);
-    $health_conditions = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
 } catch (PDOException $e) {
     error_log("Profile Edit Error: " . $e->getMessage());
@@ -139,135 +184,127 @@ require_once '../../includes/header.php';
         <div class="row justify-content-center">
             <div class="col-md-8">
                 <div class="card shadow-sm">
-                    <div class="card-header bg-light">
-                        <h5 class="card-title mb-0">
-                            <i class="fas fa-user-edit text-primary"></i> Profil Düzenle
-                        </h5>
+                    <div class="card-header bg-primary text-white">
+                        <h4 class="card-title mb-0">
+                            <i class="fas fa-user-edit"></i> Profil Düzenle
+                        </h4>
                     </div>
                     <div class="card-body">
                         <?php if($error): ?>
-                            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                            <div class="alert alert-danger">
                                 <i class="fas fa-exclamation-circle me-2"></i><?= $error ?>
-                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                             </div>
                         <?php endif; ?>
 
                         <?php if($success): ?>
-                            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                            <div class="alert alert-success">
                                 <i class="fas fa-check-circle me-2"></i><?= $success ?>
-                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                             </div>
                         <?php endif; ?>
 
                         <form method="POST" action="" class="needs-validation" novalidate>
                             <!-- Temel Bilgiler -->
-                            <h6 class="mb-3">Temel Bilgiler</h6>
+                            <h5 class="mb-3">Temel Bilgiler</h5>
                             <div class="row g-3 mb-4">
                                 <div class="col-md-6">
                                     <label class="form-label">Ad Soyad</label>
-                                    <input type="text"
-                                           name="name"
-                                           class="form-control"
-                                           required
-                                           value="<?= htmlspecialchars($user['name']) ?>">
+                                    <input type="text" class="form-control" value="<?= htmlspecialchars($userData['name'] ?? '') ?>" disabled>
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label">Email</label>
-                                    <input type="email"
-                                           name="email"
-                                           class="form-control"
-                                           required
-                                           value="<?= htmlspecialchars($user['email']) ?>">
+                                    <input type="email" class="form-control" value="<?= htmlspecialchars($userData['email'] ?? '') ?>" disabled>
                                 </div>
                             </div>
 
                             <!-- Fiziksel Bilgiler -->
-                            <h6 class="mb-3">Fiziksel Bilgiler</h6>
+                            <h5 class="mb-3">Fiziksel Bilgiler</h5>
                             <div class="row g-3 mb-4">
                                 <div class="col-md-3">
-                                    <label class="form-label">Yaş</label>
+                                    <label class="form-label">Yaş <span class="text-danger">*</span></label>
                                     <input type="number"
                                            name="age"
                                            class="form-control"
                                            required
-                                           value="<?= $user['age'] ?>">
+                                           min="15"
+                                           max="100"
+                                           value="<?= htmlspecialchars($profile['age'] ?? '') ?>">
                                 </div>
                                 <div class="col-md-3">
-                                    <label class="form-label">Cinsiyet</label>
+                                    <label class="form-label">Cinsiyet <span class="text-danger">*</span></label>
                                     <select name="gender" class="form-select" required>
-                                        <option value="male" <?= $user['gender'] == 'male' ? 'selected' : '' ?>>Erkek</option>
-                                        <option value="female" <?= $user['gender'] == 'female' ? 'selected' : '' ?>>Kadın</option>
+                                        <option value="">Seçin</option>
+                                        <option value="male" <?= ($profile['gender'] ?? '') == 'male' ? 'selected' : '' ?>>Erkek</option>
+                                        <option value="female" <?= ($profile['gender'] ?? '') == 'female' ? 'selected' : '' ?>>Kadın</option>
                                     </select>
                                 </div>
                                 <div class="col-md-3">
-                                    <label class="form-label">Boy (cm)</label>
+                                    <label class="form-label">Boy (cm) <span class="text-danger">*</span></label>
                                     <input type="number"
                                            name="height"
                                            class="form-control"
                                            required
-                                           value="<?= $user['height'] ?>">
+                                           min="100"
+                                           max="250"
+                                           value="<?= htmlspecialchars($profile['height'] ?? '') ?>">
                                 </div>
                                 <div class="col-md-3">
-                                    <label class="form-label">Mevcut Kilo (kg)</label>
+                                    <label class="form-label">Mevcut Kilo (kg) <span class="text-danger">*</span></label>
                                     <input type="number"
                                            name="current_weight"
                                            class="form-control"
                                            required
+                                           min="30"
+                                           max="300"
                                            step="0.1"
-                                           value="<?= $user['current_weight'] ?>">
+                                           value="<?= htmlspecialchars($profile['current_weight'] ?? '') ?>">
                                 </div>
                             </div>
 
                             <!-- Hedef ve Aktivite -->
-                            <h6 class="mb-3">Hedef ve Aktivite</h6>
+                            <h5 class="mb-3">Hedef ve Aktivite</h5>
                             <div class="row g-3 mb-4">
                                 <div class="col-md-4">
-                                    <label class="form-label">Hedef Kilo (kg)</label>
+                                    <label class="form-label">Hedef Kilo (kg) <span class="text-danger">*</span></label>
                                     <input type="number"
                                            name="target_weight"
                                            class="form-control"
                                            required
+                                           min="30"
+                                           max="300"
                                            step="0.1"
-                                           value="<?= $user['target_weight'] ?>">
+                                           value="<?= htmlspecialchars($profile['target_weight'] ?? '') ?>">
                                 </div>
                                 <div class="col-md-4">
-                                    <label class="form-label">Aktivite Seviyesi</label>
+                                    <label class="form-label">Aktivite Seviyesi <span class="text-danger">*</span></label>
                                     <select name="activity_level" class="form-select" required>
-                                        <option value="sedentary" <?= $user['activity_level'] == 'sedentary' ? 'selected' : '' ?>>
-                                            Hareketsiz
+                                        <option value="">Seçin</option>
+                                        <option value="sedentary" <?= ($profile['activity_level'] ?? '') == 'sedentary' ? 'selected' : '' ?>>
+                                            Hareketsiz (Masa başı iş)
                                         </option>
-                                        <option value="lightly_active" <?= $user['activity_level'] == 'lightly_active' ? 'selected' : '' ?>>
-                                            Az Hareketli
+                                        <option value="lightly_active" <?= ($profile['activity_level'] ?? '') == 'lightly_active' ? 'selected' : '' ?>>
+                                            Az Hareketli (Haftada 1-3 gün egzersiz)
                                         </option>
-                                        <option value="moderately_active" <?= $user['activity_level'] == 'moderately_active' ? 'selected' : '' ?>>
-                                            Orta Hareketli
+                                        <option value="moderately_active" <?= ($profile['activity_level'] ?? '') == 'moderately_active' ? 'selected' : '' ?>>
+                                            Orta Hareketli (Haftada 3-5 gün egzersiz)
                                         </option>
-                                        <option value="very_active" <?= $user['activity_level'] == 'very_active' ? 'selected' : '' ?>>
-                                            Çok Hareketli
+                                        <option value="very_active" <?= ($profile['activity_level'] ?? '') == 'very_active' ? 'selected' : '' ?>>
+                                            Çok Hareketli (Haftada 6-7 gün egzersiz)
                                         </option>
                                     </select>
                                 </div>
                                 <div class="col-md-4">
                                     <label class="form-label">Diyet Tipi</label>
-                                    <select name="diet_type" class="form-select" required>
-                                        <option value="normal" <?= $user['diet_type'] == 'normal' ? 'selected' : '' ?>>
-                                            Normal
-                                        </option>
-                                        <option value="vegetarian" <?= $user['diet_type'] == 'vegetarian' ? 'selected' : '' ?>>
-                                            Vejetaryen
-                                        </option>
-                                        <option value="vegan" <?= $user['diet_type'] == 'vegan' ? 'selected' : '' ?>>
-                                            Vegan
-                                        </option>
-                                        <option value="gluten_free" <?= $user['diet_type'] == 'gluten_free' ? 'selected' : '' ?>>
-                                            Glutensiz
-                                        </option>
+                                    <select name="diet_type" class="form-select">
+                                        <option value="normal" <?= ($profile['diet_type'] ?? '') == 'normal' ? 'selected' : '' ?>>Normal</option>
+                                        <option value="vegetarian" <?= ($profile['diet_type'] ?? '') == 'vegetarian' ? 'selected' : '' ?>>Vejetaryen</option>
+                                        <option value="vegan" <?= ($profile['diet_type'] ?? '') == 'vegan' ? 'selected' : '' ?>>Vegan</option>
+                                        <option value="gluten_free" <?= ($profile['diet_type'] ?? '') == 'gluten_free' ? 'selected' : '' ?>>Glutensiz</option>
                                     </select>
                                 </div>
                             </div>
 
                             <!-- Sağlık Durumları -->
-                            <h6 class="mb-3">Sağlık Durumları</h6>
+                            <h5 class="mb-3">Sağlık Durumları</h5>
                             <div class="mb-4">
                                 <div class="row g-3">
                                     <div class="col-md-4">
@@ -276,7 +313,7 @@ require_once '../../includes/header.php';
                                                    type="checkbox"
                                                    name="health_conditions[]"
                                                    value="diabetes"
-                                                <?= in_array('diabetes', $health_conditions) ? 'checked' : '' ?>>
+                                                <?= in_array('diabetes', $healthConditions) ? 'checked' : '' ?>>
                                             <label class="form-check-label">Diyabet</label>
                                         </div>
                                     </div>
@@ -286,7 +323,7 @@ require_once '../../includes/header.php';
                                                    type="checkbox"
                                                    name="health_conditions[]"
                                                    value="hypertension"
-                                                <?= in_array('hypertension', $health_conditions) ? 'checked' : '' ?>>
+                                                <?= in_array('hypertension', $healthConditions) ? 'checked' : '' ?>>
                                             <label class="form-check-label">Hipertansiyon</label>
                                         </div>
                                     </div>
@@ -296,7 +333,7 @@ require_once '../../includes/header.php';
                                                    type="checkbox"
                                                    name="health_conditions[]"
                                                    value="cholesterol"
-                                                <?= in_array('cholesterol', $health_conditions) ? 'checked' : '' ?>>
+                                                <?= in_array('cholesterol', $healthConditions) ? 'checked' : '' ?>>
                                             <label class="form-check-label">Kolesterol</label>
                                         </div>
                                     </div>
