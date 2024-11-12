@@ -166,4 +166,4 @@ git clone https://github.com/fyildirim-debug/diet-app.git
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-![Visitors](http://fysunucu.com/profilecounter/counter_badge.php?key=43d60309042cc6290bac0ad210676df4)
+![Visitors](http://fysunucu.com/profilecounter/counter_badge.php?key=c20778c082ca0ffe28dd9f66ab05b40b)
