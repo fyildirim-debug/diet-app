@@ -160,6 +160,9 @@ git clone https://github.com/fyildirim-debug/diet-app.git
 - **Furkan YILDIRIM**
 - Website: [furkanyildirim.com](https://furkanyildirim.com)
 - GitHub: [@fyildirim-debug](https://github.com/fyildirim-debug)
+
+![Visitors](https://api.visitorbadge.io/api/visitors?path=fyildirim-debug&label=ZIYARETCI&labelColor=#697689&countColor=#555555)
+![Profile Views](https://komarev.com/ghpvc/?username=fyildirim-debug&color=blue)
 - Email: posta@furkanyildirim.com
 
 ### 📝 License
